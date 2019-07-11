@@ -164,6 +164,8 @@ int server(int serverSockfd)
     }
 }
 
+
+
 int client_start(char *update_download, char * local_path,char * remote_name,char * numport, char * ip){
     char* endD;
     int t;
@@ -173,9 +175,8 @@ int client_start(char *update_download, char * local_path,char * remote_name,cha
         return -1;
     }
     printf(CONNECTED_SUCCESSFULLY_STR);
-
+    cout<<(strlen(numport));
     write(t,ip,1000);
-
     write(t,update_download,1000);
     write(t,local_path,1000);
     write(t,remote_name,1000);
