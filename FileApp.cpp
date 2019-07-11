@@ -9,23 +9,43 @@
 #include <netdb.h>
 using namespace std;
 char * local_dir_path;
+#define invalidFileNameClint 0
+#define invalidFileNameSever 1
+#define canNotOpenClint 2
+#define canNotOpenSever 3
+#define READ 1
+#define WRITE 0
+#define sysCallFaild ("sysCallFaild\n")
 
-int read_data(int s, char *buf, int n) {
+int read_data(int s, char *buf, int n, int mode)
+{
     int bcount;       /* counts bytes read */
     int br;               /* bytes read this pass */
     bcount= 0;
     br= 0;
 
     while (bcount < n) { /* loop until full buffer */
-        br = read(s, buf, n-bcount);
+        if (mode)
+        {
+            br = read(s, buf, n-bcount);
+            cout << "br: " << br << endl;
+        }
+        else
+            br = write(s, buf, n-bcount);
         if (br > 0)  {
             bcount += br;
+            cout << "bcount" << bcount << endl;
             buf += br;
+        }
+        if (br == 0)
+        {
+            break;
         }
         if (br < 1) {
             return(-1);
         }
     }
+    cout << "lastbcount" << bcount << endl;
     return(bcount);
 }
 
@@ -67,15 +87,6 @@ int get_connection(int s) {
     return t;
 }
 
-int IP_Addresses(char * IP_adrress,char * IP_port) {
-    struct sockaddr_in my_addr;
-    my_addr.sin_family = AF_INET;
-    my_addr.sin_port = htons(3490);
-    inet_aton(IP_adrress, &(my_addr.sin_addr));
-    memset(&(my_addr.sin_zero), '\0', 8);
-    return 0;
-}
-
 int call_socket(char *hostname, unsigned short portnum) {
     struct sockaddr_in sa;
     struct hostent *hp;
@@ -100,21 +111,114 @@ int call_socket(char *hostname, unsigned short portnum) {
     return(s);
 }
 
+std::string makePath(char * severDir,char * fileName){
+    std::string str;
+    str.append(severDir);
+    str.append("/");
+    str.append(fileName);
+    return str;
+}
+
+int handle_upload_sever(int clientSock, char * pathToPrint){
+    char revbuf[1000];
+    FILE *fr = fopen(pathToPrint, "w");
+    if (fr != nullptr){
+        cout << "hi" << endl;
+        bzero(revbuf, 1000);
+        int fr_block_sz = 0;
+        while ((fr_block_sz = read_data(clientSock, revbuf, 1000, READ)) > 0) {
+            int write_sz = fwrite(revbuf, sizeof(char), fr_block_sz, fr);
+            if (write_sz < fr_block_sz) {
+                printf(sysCallFaild);
+                return -1;
+            }
+            bzero(revbuf, 1000);
+            if (fr_block_sz == 0) {
+                break;
+            }
+        }
+        if (fr_block_sz < 0) {
+            printf(sysCallFaild);
+            return -1;
+        }
+        fclose(fr);
+    }
+    else{
+        printf(sysCallFaild);
+    }
+
+}
+
+
 int handleClientRequest(int clientSock){
     char ip[1000];
     char upORDown[1000];
     char path[1000];
-    char remote[1000];
+    char fileName[1000];
+    int isOk[4] = {0,0,0,0};
+    int handle;
 
+    //get file name,up \down
     read(clientSock,ip,1000);
     read(clientSock,upORDown,1000);
+    read (clientSock,isOk,4);
+    read(clientSock,fileName,1000);
+
+    if (strlen(fileName)+ strlen(local_dir_path)+1 >4095 ){
+
+        isOk[invalidFileNameSever] =1;
+    }
+    write(clientSock,isOk,4);
+    std::string pathStr = makePath(local_dir_path,fileName);
+    char pathToPrint[pathStr.length() + 1];
+    strcpy(pathToPrint, pathStr.c_str());
     read(clientSock,path,1000);
-    read(clientSock,remote,1000);
+
+    //print
     printf(CLIENT_IP_STR,ip);
     printf(CLIENT_COMMAND_STR,upORDown[0]);
-    printf(FILENAME_STR,path);
-    printf(FILE_PATH_STR,remote);
+    printf(FILENAME_STR,fileName);
+    printf(FILE_PATH_STR,pathToPrint);
 
+
+    //invalidFileNameClint or invalidFileNameSever
+    if ((isOk[invalidFileNameClint] ==1) or (isOk[invalidFileNameSever] ==1)){
+        printf(FILE_NAME_ERROR_STR);
+        printf(FAILURE_STR);
+        return -1;
+    }
+
+    //if u and no canNotOpenClint -upload
+    if (upORDown[0] == 'u') {
+        read (clientSock,isOk,4);
+        cout<< isOk[canNotOpenClint]<<endl;
+        if (isOk[canNotOpenClint] == 0 ) {
+            handle = handle_upload_sever(clientSock,pathToPrint);
+        }
+    }
+
+    if (upORDown[0] == 'd') {
+//        read (clientSock,isOk,4);
+//        if (isOk[canNotOpenClint] ==0 ) {
+//            handle = handle_upload_sever(clientSock,pathToPrint);
+//        }
+    }
+
+   if (isOk[canNotOpenClint]==1){
+        printf(REMOTE_FILE_ERROR_STR);
+        printf(FAILURE_STR);
+    }
+    else if (isOk[canNotOpenSever]==1){
+        printf(MY_FILE_ERROR_STR);
+        printf(FAILURE_STR);
+    }
+    else if ( handle == -1){
+       printf(sysCallFaild);
+    }
+    else {
+        printf(SUCCESS_STR);
+    }
+    close(clientSock);
     return 0;
 }
 
@@ -144,16 +248,14 @@ int server(int serverSockfd)
 
         if (FD_ISSET(STDIN_FILENO, &readfds)) {
 
+
             char ip[1000];
-            //int n = 0;
-            //bzero(ip, sizeof(ip));
-            read(STDIN_FILENO,ip,1000);
-            //printf(ip);
-            ip[4] = '\0';   /// to do - find diferent way for comapring ip to quit (and change name of ip...)
+            cin >> ip;
             if (strcmp(ip,"quit") == 0){
                 printf("break");
                 break;
             }
+
 
         }
         else {
@@ -161,25 +263,97 @@ int server(int serverSockfd)
             //and then receive a message from him
             handleClientRequest(t);
         }
+
     }
+    return 0;
 }
 
-
+int handle_upload_clint(int s, char *local_path, FILE* file)
+{
+    // open file and read
+    /*Receive File from Client */
+    char senbuf[1000];
+//    FILE *fs = fopen(local_path, "r");
+    if(file == nullptr) {
+        printf(sysCallFaild);
+        cout << "1";
+        return -1;
+    }
+    else
+    {
+        bzero(senbuf, 1000);
+        int fs_block_sz;
+        while ((fs_block_sz = fread(senbuf, sizeof(char), 1000, file)) > 0)
+        {
+            if (read_data(s, senbuf, fs_block_sz, WRITE) < 0) {
+                printf(FAILURE_STR);
+                return -1;
+            }
+            bzero(senbuf, 1000);
+        }
+    }
+    fclose(file );
+    return 0;
+}
 
 int client_start(char *update_download, char * local_path,char * remote_name,char * numport, char * ip){
     char* endD;
     int t;
+    int isOk[4] ={0,0,0,0};
+
+
     auto portnum = (u_short)strtol(numport,&endD,10);
     t= call_socket(ip, portnum);
     if (t ==-1){
         return -1;
     }
     printf(CONNECTED_SUCCESSFULLY_STR);
-    cout<<(strlen(numport));
     write(t,ip,1000);
     write(t,update_download,1000);
-    write(t,local_path,1000);
+
+    // is file name =remote_name ok by clint
+    std::string s = remote_name;
+    if (strlen(remote_name) > 255 or (s.find('/') != std::string::npos)){
+        isOk[invalidFileNameClint] = 1;
+    }
+    write(t,isOk,4);
     write(t,remote_name,1000);
+    // is file name =remote_name ok by sever
+    read (t,isOk,4);
+
+    write(t,local_path,1000);
+
+
+    if (strcmp(update_download,"u") == 0 )
+    {
+        FILE *fs = fopen(local_path, "r");
+        if (fs == nullptr){
+            isOk[canNotOpenClint] = 1;
+            write(t,isOk,4);
+        }
+        else {
+            int handle = handle_upload_clint(t, remote_name, fs);
+        }
+    }
+
+
+
+    if (isOk[invalidFileNameClint] ==1 or isOk[invalidFileNameSever] ==1){
+        printf(FILE_NAME_ERROR_STR);
+        cout<<(FAILURE_STR);
+    }
+    else if (isOk[canNotOpenClint]){
+        printf(MY_FILE_ERROR_STR);
+        printf(FAILURE_STR);
+    }
+    else if (isOk[canNotOpenSever]){
+        printf(REMOTE_FILE_ERROR_STR);
+        printf(FAILURE_STR);
+    }
+
+    else {
+        printf(SUCCESS_STR);
+    }
 
 
     return 0;
@@ -187,19 +361,20 @@ int client_start(char *update_download, char * local_path,char * remote_name,cha
 }
 
 int main(int argc, char *argv[]){
-
+    char* UPLOAD = (char*)"u";
+    char* DOWNLOAD = (char*)"d";
     if (strcmp(argv[1],"-s") == 0){
         char* end;
         auto portnum = (u_short)strtol(argv[3],&end,10);
-        local_dir_path =argv[3];
+        local_dir_path =argv[2];
         int s = establish(portnum);
         server(s);
     }
     else if (strcmp(argv[1],"-d")==0 ){
-        client_start("d",argv[2],argv[3],argv[4],argv[5]);
+        client_start(DOWNLOAD,argv[2],argv[3],argv[4],argv[5]);
     }
     else if (strcmp(argv[1],"-u")==0 ){
-        client_start("u",argv[2],argv[3],argv[4],argv[5]);
+        client_start(UPLOAD,argv[2],argv[3],argv[4],argv[5]);
     }
 
     return 0;
