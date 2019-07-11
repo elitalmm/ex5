@@ -1,7 +1,9 @@
 g++ -Wall FileApp.cpp -o FileApp
 
-FileApp -s server_dir 2019
+FileApp -s /cs/usr/elitali94/Desktop/sever 2019
 
-FileApp -u client_dir/c_file c_file 2019 132.65.126.31
+FileApp -u /cs/usr/elitali94/Desktop/clint/elital elital 2019 132.65.126.31
 
 FileApp -d client_dir/c_file c_d 2019 132.65.126.31
+
+FileApp -u client_dir/c_file c_file 2019 132.65.126.31
